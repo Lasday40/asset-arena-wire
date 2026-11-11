@@ -10,6 +10,7 @@ Usage:
   python3 build.py --drafts   also build releases with status "draft" (local preview)
   python3 build.py --check    validate releases only, write nothing
 """
+import hashlib
 import html
 import json
 import re
@@ -129,6 +130,11 @@ def load_releases(cfg, include_drafts):
 
 # ---------------------------------------------------------------- layout
 
+def asset_version(name):
+    """Short content hash so browsers refetch an asset whenever it changes."""
+    return hashlib.sha1((ASSETS_DIR / name).read_bytes()).hexdigest()[:8]
+
+
 FONTS = (
     '<link rel="preconnect" href="https://fonts.googleapis.com">'
     '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
@@ -157,11 +163,11 @@ def page(cfg, *, title, description, rel, body, path, og_type="website", extra_h
 <meta property="og:url" content="{esc(canonical)}">
 <meta property="og:image" content="{esc(og_image)}">
 <meta name="twitter:card" content="{card}">
-<link rel="icon" type="image/png" href="{rel}assets/asset-arena-wire-icon.png">
-<link rel="apple-touch-icon" href="{rel}assets/asset-arena-wire-icon.png">
+<link rel="icon" type="image/png" href="{rel}assets/asset-arena-wire-icon.png?v={asset_version('asset-arena-wire-icon.png')}">
+<link rel="apple-touch-icon" href="{rel}assets/asset-arena-wire-icon.png?v={asset_version('asset-arena-wire-icon.png')}">
 <link rel="alternate" type="application/rss+xml" title="{esc(cfg['site_name'])}" href="{rel}feed.xml">
 {FONTS}
-<link rel="stylesheet" href="{rel}assets/style.css">
+<link rel="stylesheet" href="{rel}assets/style.css?v={asset_version('style.css')}">
 {extra_head}
 </head>
 <body>
