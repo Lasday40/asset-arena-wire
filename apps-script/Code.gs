@@ -14,8 +14,12 @@ var NOTIFY_EMAIL = 'lasday.david@gmail.com';
 var HEADERS = [
   'Submitted', 'Status', 'Plan', 'Contact name', 'Email', 'Organization', 'Website',
   'Phone', 'Headline', 'Subheadline', 'Category', 'Dateline', 'Requested date',
-  'Body', 'About', 'Media contact', 'Notes', 'Invoice sent', 'Paid', 'Published URL'
+  'Body', 'About', 'Media contact', 'Notes', 'Invoice sent', 'Paid', 'Published URL',
+  'Image', 'Image caption'
 ];
+var IMAGE_FOLDER_NAME = 'Asset Arena Wire Images';
+var IMAGE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+var MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 function doGet() {
   return ContentService.createTextOutput('Asset Arena Wire submission endpoint is live.');
@@ -46,8 +50,14 @@ function doPost(e) {
       clean(p.organization), clean(p.website), clean(p.phone), clean(p.headline, 300),
       clean(p.subheadline, 400), clean(p.category), clean(p.dateline), clean(p.release_date),
       clean(p.body, 20000), clean(p.about, 3000), clean(p.media_contact), clean(p.notes, 3000),
-      '', '', ''
+      '', '', '', '', clean(p.image_caption, 300)
     ];
+    // Save the image first; a bad image must not lose the submission.
+    try {
+      row[20] = saveImage_(p, clean(p.organization, 60));
+    } catch (imgErr) {
+      row[20] = p.image_data ? 'Image upload failed: ' + imgErr : '';
+    }
     var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
     sheet.appendRow(row);
 
@@ -61,6 +71,7 @@ function doPost(e) {
           'Organization: ' + row[5] + ' ' + row[6],
           'Category: ' + row[10],
           'Requested date: ' + row[12],
+          'Image: ' + (row[20] || 'none'),
           '',
           'Headline: ' + row[8],
           'Subheadline: ' + row[9],
@@ -78,6 +89,35 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function imageFolder_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('IMAGE_FOLDER_ID');
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (e) { /* folder deleted, recreate */ }
+  }
+  var folder = DriveApp.createFolder(IMAGE_FOLDER_NAME);
+  props.setProperty('IMAGE_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function saveImage_(p, org) {
+  if (!p.image_data) return '';
+  var type = String(p.image_type || '');
+  var ext = IMAGE_TYPES[type];
+  if (!ext) throw 'unsupported type ' + type;
+  var bytes = Utilities.base64Decode(String(p.image_data));
+  if (bytes.length > MAX_IMAGE_BYTES) throw 'file too large';
+  var stamp = Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss');
+  var name = stamp + '-' + (slugify_(org) || 'submission') + '.' + ext;
+  var file = imageFolder_().createFile(Utilities.newBlob(bytes, type, name));
+  return file.getUrl();
+}
+
+// Run once from the editor to create the image folder and grant Drive access.
+function setupImages() {
+  Logger.log(imageFolder_().getUrl());
 }
 
 // ---------- review helpers
@@ -130,6 +170,9 @@ function showReleaseJson() {
     },
     tags: []
   };
+  if (get('Image') && /^https:/.test(get('Image'))) {
+    release.image = { src: 'images/' + iso + '-' + release.slug + '.jpg', alt: release.headline, caption: noDashes_(unquote(get('Image caption'))) };
+  }
   var filename = iso + '-' + release.slug + '.json';
   var json = JSON.stringify(release, null, 2);
   var out = HtmlService.createHtmlOutput(

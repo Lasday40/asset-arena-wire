@@ -35,9 +35,12 @@ The press release wire built for sports business. A static site on GitHub Pages,
   "body": ["First paragraph.", "Second paragraph. **Bold** and [links](https://example.com) work."],
   "about": [{ "name": "Acme Sports", "text": "Boilerplate." }],
   "contact": { "name": "Jane Doe", "organization": "Acme Sports", "email": "press@example.com", "phone": "" },
-  "tags": ["seed round"]
+  "tags": ["seed round"],
+  "image": { "src": "images/2026-11-20-acme-raises-5m-seed.jpg", "alt": "Acme Sports founders", "caption": "Photo courtesy of Acme Sports" }
 }
 ```
+
+`image` is optional. Put the file in `releases/images/` (JPG, PNG or WebP). It shows on the release page, as a thumbnail in lists, and as the LinkedIn preview image. Images uploaded through the form are saved to the "Asset Arena Wire Images" folder in Drive, with the link in the Sheet's Image column.
 
 `status` is `published` or `draft`. The category must match one in `config.json`. The build fails on missing fields, duplicate slugs, bad dates, or any em or en dash.
 

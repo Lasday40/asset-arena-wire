@@ -22,6 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "_site"
 RELEASES_DIR = ROOT / "releases"
+IMAGES_DIR = RELEASES_DIR / "images"
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 ASSETS_DIR = ROOT / "assets"
 
 REQUIRED = ["slug", "status", "date", "category", "organization", "headline", "body", "contact"]
@@ -104,6 +106,15 @@ def load_releases(cfg, include_drafts):
             continue
         if not isinstance(r["body"], list) or not all(isinstance(p, str) for p in r["body"]):
             errors.append(f"{name}: body must be a list of paragraph strings")
+        img = r.get("image")
+        if img:
+            src = img.get("src", "") if isinstance(img, dict) else ""
+            if not src.startswith("images/") or Path(src).suffix.lower() not in IMAGE_EXTS:
+                errors.append(f"{name}: image.src must be images/<file>.jpg|png|webp")
+            elif not (RELEASES_DIR / src).is_file():
+                errors.append(f"{name}: image file releases/{src} not found")
+            elif not img.get("alt"):
+                errors.append(f"{name}: image.alt is required (describe the image)")
         if not r["organization"].get("name"):
             errors.append(f"{name}: organization.name is required")
         for s in walk_strings(r):
@@ -126,8 +137,10 @@ FONTS = (
 )
 
 
-def page(cfg, *, title, description, rel, body, path, og_type="website", extra_head=""):
+def page(cfg, *, title, description, rel, body, path, og_type="website", extra_head="", og_image=None):
     canonical = cfg["base_url"].rstrip("/") + "/" + path
+    og_image = og_image or cfg["base_url"].rstrip("/") + "/assets/asset-arena-logo.png"
+    card = "summary_large_image" if "/images/" in og_image else "summary"
     full_title = f"{title} | {cfg['site_name']}" if title != cfg["site_name"] else f"{cfg['site_name']} | {cfg['tagline']}"
     return f"""<!doctype html>
 <html lang="en">
@@ -142,7 +155,8 @@ def page(cfg, *, title, description, rel, body, path, og_type="website", extra_h
 <meta property="og:description" content="{esc(description)}">
 <meta property="og:type" content="{og_type}">
 <meta property="og:url" content="{esc(canonical)}">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="{esc(og_image)}">
+<meta name="twitter:card" content="{card}">
 <link rel="icon" href="{rel}assets/asset-arena-logo.png">
 <link rel="alternate" type="application/rss+xml" title="{esc(cfg['site_name'])}" href="{rel}feed.xml">
 {FONTS}
@@ -189,11 +203,16 @@ def release_item(r, rel):
     badge = '<span class="fm">Founding Member</span>' if r.get("founding_member") else ""
     draft = '<span class="draft">Draft</span>' if r["status"] == "draft" else ""
     sub = f'<p class="item-sub">{inline(r["subheadline"])}</p>' if r.get("subheadline") else ""
-    return f"""<article class="item">
+    img = r.get("image")
+    thumb = (f'<a class="thumb" href="{rel}news/{r["slug"]}/index.html" tabindex="-1" aria-hidden="true">'
+             f'<img src="{rel}{esc(img["src"])}" alt="" loading="lazy"></a>') if img else ""
+    return f"""<article class="item{' has-thumb' if img else ''}">
+  {thumb}<div class="item-text">
   <div class="item-meta"><time datetime="{r['date']}">{nice_date(r['_date'])}</time><a class="chip" href="{rel}category/{slugify(r['category'])}/index.html">{esc(r['category'])}</a>{badge}{draft}</div>
   <h3><a href="{rel}news/{r['slug']}/index.html">{inline(r['headline'])}</a></h3>
   {sub}
   <p class="item-org">{esc(r['organization']['name'])}</p>
+  </div>
 </article>"""
 
 
@@ -315,6 +334,13 @@ def build_release(cfg, r):
     badge = '<span class="fm">Founding Member</span>' if r.get("founding_member") else ""
     draft = '<p class="draft-banner">Draft preview. Not published.</p>' if r["status"] == "draft" else ""
     sub = f'<p class="subhead">{inline(r["subheadline"])}</p>' if r.get("subheadline") else ""
+    img = r.get("image")
+    figure = ""
+    og_image = None
+    if img:
+        cap = f'<figcaption>{inline(img["caption"])}</figcaption>' if img.get("caption") else ""
+        figure = f'<figure class="release-figure"><img src="{rel}{esc(img["src"])}" alt="{esc(img["alt"])}">{cap}</figure>'
+        og_image = cfg["base_url"].rstrip("/") + "/" + img["src"]
     ld = {
         "@context": "https://schema.org",
         "@type": "NewsArticle",
@@ -324,6 +350,8 @@ def build_release(cfg, r):
         "author": {"@type": "Organization", "name": org["name"]},
         "url": cfg["base_url"].rstrip("/") + f"/news/{r['slug']}/",
     }
+    if og_image:
+        ld["image"] = og_image
     extra = '<script type="application/ld+json">' + json.dumps(ld).replace("</", "<\\/") + "</script>"
     body = f"""
 <article class="release wrap">
@@ -332,6 +360,7 @@ def build_release(cfg, r):
   <h1>{inline(r['headline'])}</h1>
   {sub}
   <p class="source">Source: {org_html}</p>
+  {figure}
   <div class="release-body">{body_html}</div>
   <div class="release-about">{abouts}</div>
   <div class="release-contact"><h3>Media contact</h3><p>{contact}</p></div>
@@ -347,7 +376,7 @@ def build_release(cfg, r):
 """
     desc = r.get("subheadline") or r["body"][0][:200]
     return page(cfg, title=r["headline"], description=desc, rel=rel, body=body,
-                path=f"news/{r['slug']}/", og_type="article", extra_head=extra)
+                path=f"news/{r['slug']}/", og_type="article", extra_head=extra, og_image=og_image)
 
 
 def build_category(cfg, cat, releases):
@@ -401,6 +430,13 @@ def build_submit(cfg):
         <label>Dateline city<input name="dateline" placeholder="e.g. New York"></label>
         <label>Requested release date<input name="release_date" type="date"></label>
         <label class="full">Release text<textarea name="body" rows="12" required placeholder="Paste the full release. Separate paragraphs with a blank line."></textarea></label>
+        <div class="full upload">
+          <label>Image (optional): logo, product shot or photo<input name="image_file" id="image_file" type="file" accept="image/jpeg,image/png,image/webp"></label>
+          <p class="hint">JPG, PNG or WebP, up to 8 MB. Large photos are resized automatically. Landscape images look best.</p>
+          <div class="preview" id="image_preview" hidden><img alt=""><button type="button" class="btn btn-ghost" id="image_clear">Remove image</button></div>
+          <label>Image caption or credit (optional)<input name="image_caption" maxlength="300" placeholder="e.g. Photo courtesy of Acme Sports"></label>
+          <label class="check"><input type="checkbox" name="image_rights" value="yes" id="image_rights"><span>I have the rights to publish this image.</span></label>
+        </div>
         <label class="full">About your organization (boilerplate)<textarea name="about" rows="4"></textarea></label>
         <label class="full">Media contact (name, email, phone)<textarea name="media_contact" rows="2"></textarea></label>
         <label class="full">Anything else we should know?<textarea name="notes" rows="3"></textarea></label>
@@ -426,6 +462,47 @@ const statusEl = document.getElementById('status');
 const cta = document.getElementById('cta');
 const want = new URLSearchParams(location.search).get('plan');
 if (want) {{ const r = form.querySelector('input[data-id="' + want + '"]'); if (r) r.checked = true; }}
+const MAX_BYTES = 8 * 1024 * 1024, MAX_DIM = 2000;
+const fileInput = document.getElementById('image_file');
+const preview = document.getElementById('image_preview');
+const rights = document.getElementById('image_rights');
+let image = null; // {{ data, type }}
+
+function readAsDataURL(f) {{
+  return new Promise((ok, bad) => {{ const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(f); }});
+}}
+async function prepareImage(f) {{
+  const url = await readAsDataURL(f);
+  const img = new Image();
+  await new Promise((ok, bad) => {{ img.onload = ok; img.onerror = bad; img.src = url; }});
+  const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
+  if (scale === 1 && f.size <= 2 * 1024 * 1024) return {{ url, type: f.type }};
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  const type = f.type === 'image/png' ? 'image/png' : 'image/jpeg'; // keep PNG transparency for logos
+  return {{ url: c.toDataURL(type, 0.86), type }};
+}}
+fileInput.addEventListener('change', async () => {{
+  image = null; preview.hidden = true; rights.required = false; statusEl.textContent = '';
+  const f = fileInput.files[0];
+  if (!f) return;
+  if (!/^image\\/(jpeg|png|webp)$/.test(f.type)) {{ statusEl.textContent = 'Please choose a JPG, PNG or WebP image.'; fileInput.value = ''; return; }}
+  if (f.size > MAX_BYTES) {{ statusEl.textContent = 'That image is over 8 MB. Please choose a smaller one.'; fileInput.value = ''; return; }}
+  try {{
+    const p = await prepareImage(f);
+    image = {{ data: p.url.split(',')[1], type: p.type }};
+    preview.querySelector('img').src = p.url;
+    preview.hidden = false;
+    rights.required = true;
+  }} catch (err) {{
+    statusEl.textContent = 'That image could not be read. Please try another file.'; fileInput.value = '';
+  }}
+}});
+document.getElementById('image_clear').addEventListener('click', () => {{
+  fileInput.value = ''; image = null; preview.hidden = true; rights.required = false; rights.checked = false;
+}});
+
 form.addEventListener('submit', async (e) => {{
   e.preventDefault();
   if (!form.reportValidity()) return;
@@ -436,7 +513,11 @@ form.addEventListener('submit', async (e) => {{
   cta.disabled = true;
   statusEl.textContent = 'Sending...';
   try {{
-    await fetch(ENDPOINT, {{ method: 'POST', mode: 'no-cors', body: new URLSearchParams(new FormData(form)) }});
+    const fd = new FormData(form);
+    fd.delete('image_file');
+    const body = new URLSearchParams(fd);
+    if (image) {{ body.set('image_data', image.data); body.set('image_type', image.type); }}
+    await fetch(ENDPOINT, {{ method: 'POST', mode: 'no-cors', body }});
     form.hidden = true;
     document.getElementById('thanks').hidden = false;
     window.scrollTo({{ top: 0, behavior: 'smooth' }});
@@ -513,6 +594,8 @@ def main(argv):
         shutil.rmtree(OUT)
     OUT.mkdir()
     shutil.copytree(ASSETS_DIR, OUT / "assets")
+    if IMAGES_DIR.is_dir():
+        shutil.copytree(IMAGES_DIR, OUT / "images")
     if (ROOT / "CNAME").exists():
         shutil.copy(ROOT / "CNAME", OUT / "CNAME")
     write(OUT / ".nojekyll", "")
