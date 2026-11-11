@@ -189,7 +189,6 @@ def page(cfg, *, title, description, rel, body, path, og_type="website", extra_h
       <a href="{rel}feed.xml">RSS feed</a>
       <a href="{rel}submit/index.html">Submit a release</a>
       <a href="{esc(cfg['newsletter_url'])}" target="_blank" rel="noopener">Asset Arena newsletter</a>
-      <a href="mailto:{esc(cfg['contact_email'])}">Contact</a>
     </div>
   </div>
   <div class="wrap fine">Releases are supplied by the organizations named in them and reviewed before publishing. &copy; {date.today().year} Asset Arena.</div>
@@ -403,7 +402,6 @@ def build_submit(cfg):
         for p in cfg["plans"]
     )
     endpoint = json.dumps(cfg["submit_endpoint"])
-    email = json.dumps(cfg["contact_email"])
     body = f"""
 <section class="section">
   <div class="wrap narrow">
@@ -456,7 +454,6 @@ def build_submit(cfg):
 </section>
 <script>
 const ENDPOINT = {endpoint};
-const FALLBACK_EMAIL = {email};
 const form = document.getElementById('submit-form');
 const statusEl = document.getElementById('status');
 const cta = document.getElementById('cta');
@@ -507,7 +504,7 @@ form.addEventListener('submit', async (e) => {{
   e.preventDefault();
   if (!form.reportValidity()) return;
   if (!ENDPOINT || ENDPOINT.indexOf('script.google.com') === -1) {{
-    statusEl.innerHTML = 'Online submissions open soon. For now, email your release to <a href="mailto:' + FALLBACK_EMAIL + '">' + FALLBACK_EMAIL + '</a>.';
+    statusEl.textContent = 'Online submissions are temporarily unavailable. Please try again later.';
     return;
   }}
   cta.disabled = true;
@@ -522,7 +519,7 @@ form.addEventListener('submit', async (e) => {{
     document.getElementById('thanks').hidden = false;
     window.scrollTo({{ top: 0, behavior: 'smooth' }});
   }} catch (err) {{
-    statusEl.textContent = 'Something went wrong. Please try again or email ' + FALLBACK_EMAIL + '.';
+    statusEl.textContent = 'Something went wrong. Please try again.';
     cta.disabled = false;
   }}
 }});
