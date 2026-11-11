@@ -4,7 +4,7 @@
   "description": "Asset Arena Wire distributes sports business press releases to the investors, operators, media and partners who follow the industry.",
   "base_url": "https://lasday40.github.io/asset-arena-wire",
   "contact_email": "lasday.david@gmail.com",
-  "submit_endpoint": "PASTE_APPS_SCRIPT_WEB_APP_URL_HERE",
+  "submit_endpoint": "https://script.google.com/macros/s/AKfycbysxs0yNC1JNInDFDAt4_S59810owzNLD6ORkaPHILI1Ye1v_HXywJdB9dNVlb5L31uEw/exec",
   "newsletter_url": "https://asset-arena-newsletter-ceb0e.beehiiv.com/",
   "linkedin_url": "https://www.linkedin.com/in/davidlasday/",
   "categories": [
