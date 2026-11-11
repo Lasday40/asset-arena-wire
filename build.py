@@ -167,7 +167,7 @@ def page(cfg, *, title, description, rel, body, path, og_type="website", extra_h
 <a class="skip" href="#main">Skip to content</a>
 <header class="masthead">
   <div class="wrap bar">
-    <a class="brand" href="{rel}index.html"><img src="{rel}assets/asset-arena-logo.png" alt="" width="36" height="36"><span>Asset Arena <b>Wire</b></span></a>
+    <a class="brand" href="{rel}index.html"><span>Asset Arena <b>Wire</b></span></a>
     <nav aria-label="Main">
       <a href="{rel}index.html#latest">Latest</a>
       <a href="{rel}index.html#categories">Categories</a>
