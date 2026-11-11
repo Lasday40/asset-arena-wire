@@ -297,7 +297,7 @@ def build_home(cfg, releases):
 
 <section class="section" id="about">
   <div class="wrap about">
-    <img class="headshot" src="assets/david-lasday.jpg" alt="David Lasday" width="160" height="160">
+    <img class="headshot" src="assets/david-lasday-headshot.jpg" alt="David Lasday" width="160" height="160">
     <div>
       <p class="eyebrow dark">From the publisher of Asset Arena</p>
       <h2>David Lasday</h2>
