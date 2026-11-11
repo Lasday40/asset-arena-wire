@@ -26,8 +26,11 @@
   ],
   "contact": {
     "name": "David Lasday",
-    "organization": "Asset Arena",
-    "email": "lasday.david@gmail.com"
+    "organization": "Asset Arena"
   },
-  "tags": ["launch", "press releases", "sports business"]
+  "tags": [
+    "launch",
+    "press releases",
+    "sports business"
+  ]
 }
