@@ -55,4 +55,4 @@ python3 -m http.server -d _site 8000
 
 1. **Pages:** Settings > Pages > Source: **GitHub Actions**.
 2. **Form:** follow the steps at the top of `apps-script/Code.gs`, then paste the web app URL into `config.json` as `submit_endpoint`. Until then the form tells visitors to email their release instead.
-3. **Custom domain (optional):** add a `CNAME` file with the domain, update `base_url` in `config.json`, and point DNS at GitHub Pages.
+3. **Custom domain:** assetarenawire.com, registered and DNS hosted at Cloudflare (4 A records to GitHub Pages IPs, www CNAME to lasday40.github.io, DNS only). Set in Settings > Pages > Custom domain, with `base_url` in `config.json` and the `CNAME` file matching.
