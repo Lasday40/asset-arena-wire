@@ -8,7 +8,7 @@
 // Reviewing: select a row, then use the "Asset Arena Wire" menu to generate
 // the release JSON for the releases/ folder.
 
-var SHEET_ID = 'PASTE_SHEET_ID_HERE';
+var SHEET_ID = '1ult7sPwjQpgynWqjk26yEU_Flys8TmLpR5NsgKDOjGg';
 var NOTIFY_EMAIL = 'lasday.david@gmail.com';
 
 var HEADERS = [
