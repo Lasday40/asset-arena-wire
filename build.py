@@ -139,7 +139,7 @@ FONTS = (
 
 def page(cfg, *, title, description, rel, body, path, og_type="website", extra_head="", og_image=None):
     canonical = cfg["base_url"].rstrip("/") + "/" + path
-    og_image = og_image or cfg["base_url"].rstrip("/") + "/assets/asset-arena-logo.png"
+    og_image = og_image or cfg["base_url"].rstrip("/") + "/assets/asset-arena-wire-icon.png"
     card = "summary_large_image" if "/images/" in og_image else "summary"
     full_title = f"{title} | {cfg['site_name']}" if title != cfg["site_name"] else f"{cfg['site_name']} | {cfg['tagline']}"
     return f"""<!doctype html>
@@ -157,7 +157,8 @@ def page(cfg, *, title, description, rel, body, path, og_type="website", extra_h
 <meta property="og:url" content="{esc(canonical)}">
 <meta property="og:image" content="{esc(og_image)}">
 <meta name="twitter:card" content="{card}">
-<link rel="icon" href="{rel}assets/asset-arena-logo.png">
+<link rel="icon" type="image/png" href="{rel}assets/asset-arena-wire-icon.png">
+<link rel="apple-touch-icon" href="{rel}assets/asset-arena-wire-icon.png">
 <link rel="alternate" type="application/rss+xml" title="{esc(cfg['site_name'])}" href="{rel}feed.xml">
 {FONTS}
 <link rel="stylesheet" href="{rel}assets/style.css">
