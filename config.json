@@ -1,0 +1,47 @@
+{
+  "site_name": "Asset Arena Wire",
+  "tagline": "The press release wire built for sports business.",
+  "description": "Asset Arena Wire distributes sports business press releases to the investors, operators, media and partners who follow the industry.",
+  "base_url": "https://lasday40.github.io/asset-arena-wire",
+  "contact_email": "lasday.david@gmail.com",
+  "submit_endpoint": "PASTE_APPS_SCRIPT_WEB_APP_URL_HERE",
+  "newsletter_url": "https://asset-arena-newsletter-ceb0e.beehiiv.com/",
+  "linkedin_url": "https://www.linkedin.com/in/davidlasday/",
+  "categories": [
+    "Investment & Capital",
+    "Sports Tech",
+    "Teams & Leagues",
+    "Facilities & Venues",
+    "NIL & Athletes",
+    "Youth Sports",
+    "Media & Sponsorship",
+    "Events"
+  ],
+  "plans": [
+    {
+      "id": "single",
+      "name": "Single Release",
+      "price": "$199",
+      "per": "per release",
+      "features": [
+        "Hosted release page with permanent link",
+        "Listed on the Asset Arena Wire homepage, category page and RSS feed",
+        "Editorial review before publishing",
+        "Pay only after your release is approved"
+      ]
+    },
+    {
+      "id": "founding",
+      "name": "Founding Member",
+      "price": "$1,200",
+      "per": "per year",
+      "badge": "Limited to the first 15",
+      "features": [
+        "Releases all year at a locked founding rate",
+        "Founding Member badge on every release",
+        "Priority review and placement",
+        "Pay only after you are approved"
+      ]
+    }
+  ]
+}
