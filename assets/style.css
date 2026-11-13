@@ -186,3 +186,11 @@ textarea{resize:vertical}
 .btn-ghost-dark{border-color:var(--accent)}
 .fm{background:var(--gold);color:#01091D}
 .plan-featured{background:radial-gradient(500px 300px at 100% 0%,rgba(26,140,245,.25),transparent 70%),var(--night)}
+
+/* newsletter band */
+.newsletter{background:radial-gradient(900px 400px at 0% 100%,rgba(26,140,245,.25),transparent 60%),var(--night);color:#fff;padding:64px 0}
+.newsletter-inner{display:flex;flex-wrap:wrap;gap:28px;align-items:center;justify-content:space-between}
+.newsletter-inner>div{flex:1 1 460px;max-width:680px}
+.newsletter h2{font:500 clamp(28px,3.4vw,40px)/1.15 'Newsreader',Georgia,serif;margin:0}
+.newsletter-copy{color:#C9D1DD;margin:14px 0 0}
+.btn-lg{min-height:54px;padding:14px 30px;font-size:16px}

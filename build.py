@@ -179,6 +179,7 @@ def page(cfg, *, title, description, rel, body, path, og_type="website", extra_h
       <a href="{rel}index.html#latest">Latest</a>
       <a href="{rel}index.html#categories">Categories</a>
       <a href="{rel}index.html#pricing">Pricing</a>
+      <a href="{esc(subscribe_url(cfg))}" target="_blank" rel="noopener">Newsletter</a>
       <a class="btn btn-accent" href="{rel}submit/index.html">Submit a release</a>
     </nav>
   </div>
@@ -195,7 +196,7 @@ def page(cfg, *, title, description, rel, body, path, og_type="website", extra_h
     <div class="foot-links">
       <a href="{rel}feed.xml">RSS feed</a>
       <a href="{rel}submit/index.html">Submit a release</a>
-      <a href="{esc(cfg['newsletter_url'])}" target="_blank" rel="noopener">Asset Arena newsletter</a>
+      <a href="{esc(subscribe_url(cfg))}" target="_blank" rel="noopener">Subscribe to the newsletter</a>
     </div>
   </div>
   <div class="wrap fine">Releases are supplied by the organizations named in them and reviewed before publishing. &copy; {date.today().year} Asset Arena.</div>
@@ -226,6 +227,24 @@ def release_list(releases, rel, empty="No releases yet. Be the first to publish.
     if not releases:
         return f'<p class="empty">{esc(empty)}</p>'
     return '<div class="list">' + "\n".join(release_item(r, rel) for r in releases) + "</div>"
+
+
+def subscribe_url(cfg):
+    return cfg["newsletter_url"].rstrip("/") + "/subscribe"
+
+
+def newsletter_band(cfg):
+    return f"""
+<section class="newsletter" id="newsletter">
+  <div class="wrap newsletter-inner">
+    <div>
+      <p class="eyebrow">The Asset Arena newsletter</p>
+      <h2>Where sports, capital and infrastructure intersect.</h2>
+      <p class="newsletter-copy">Deals, funding rounds, facilities and the people moving sports business. Free, in your inbox.</p>
+    </div>
+    <a class="btn btn-accent btn-lg" href="{esc(subscribe_url(cfg))}" target="_blank" rel="noopener">Subscribe free</a>
+  </div>
+</section>"""
 
 
 def plans_html(cfg, rel):
@@ -292,6 +311,8 @@ def build_home(cfg, releases):
     </ol>
   </div>
 </section>
+
+{newsletter_band(cfg)}
 
 <section class="section alt" id="pricing">
   <div class="wrap">
@@ -376,6 +397,7 @@ def build_release(cfg, r):
     <a class="btn btn-ghost" href="{rel}index.html#latest">More releases</a>
   </div>
 </article>
+{newsletter_band(cfg)}
 <section class="section alt cta-band">
   <div class="wrap"><h2>Have sports business news to announce?</h2><a class="btn btn-accent" href="{rel}submit/index.html">Submit a release</a></div>
 </section>
