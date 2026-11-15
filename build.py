@@ -26,6 +26,9 @@ RELEASES_DIR = ROOT / "releases"
 IMAGES_DIR = RELEASES_DIR / "images"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 ASSETS_DIR = ROOT / "assets"
+POSTS_DIR = ROOT / "posts"
+POST_REQUIRED = ["date", "category", "url", "excerpt"]
+LINKEDIN_RE = re.compile(r"^https://(www\.)?linkedin\.com/")
 
 REQUIRED = ["slug", "status", "date", "category", "organization", "headline", "body", "contact"]
 STATUSES = {"published", "draft"}
@@ -126,6 +129,64 @@ def load_releases(cfg, include_drafts):
             releases.append(r)
     releases.sort(key=lambda r: (r["_date"], r["headline"]), reverse=True)
     return releases, errors
+
+
+def load_posts(cfg):
+    """LinkedIn posts by David, shown as commentary on category pages. Not releases."""
+    errors, posts = [], []
+    categories = set(cfg["categories"])
+    if not POSTS_DIR.is_dir():
+        return posts, errors
+    for path in sorted(POSTS_DIR.glob("*.json")):
+        name = "posts/" + path.name
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            errors.append(f"{name}: invalid JSON ({e})")
+            continue
+        for n, p in enumerate(data if isinstance(data, list) else [data]):
+            err = check_post(p, f"{name}[{n}]", categories)
+            if err:
+                errors += err
+            else:
+                posts.append(p)
+    posts.sort(key=lambda p: p["_date"], reverse=True)
+    return posts, errors
+
+
+def check_post(p, name, categories):
+    errors = []
+    missing = [k for k in POST_REQUIRED if not p.get(k)]
+    if missing:
+        return [f"{name}: missing {', '.join(missing)}"]
+    if p["category"] not in categories:
+        errors.append(f"{name}: category '{p['category']}' is not in config.json")
+    if not LINKEDIN_RE.match(p["url"]):
+        errors.append(f"{name}: url must be a linkedin.com link")
+    try:
+        p["_date"] = date.fromisoformat(p["date"])
+    except ValueError:
+        return errors + [f"{name}: date must be YYYY-MM-DD"]
+    for s in walk_strings(p):
+        if any(ch in s for ch in BANNED_DASHES):
+            errors.append(f"{name}: contains an em or en dash; use a comma, colon or hyphen")
+            break
+    return errors
+
+
+def post_list(posts, limit=None):
+    if not posts:
+        return ""
+    cards = []
+    for p in posts[:limit]:
+        title = f'<h3>{esc(p["title"])}</h3>' if p.get("title") else ""
+        cards.append(f"""<article class="post">
+  <div class="item-meta"><time datetime="{p['date']}">{nice_date(p['_date'])}</time><span class="chip chip-muted">Commentary</span></div>
+  {title}
+  <p>{esc(p['excerpt'])}</p>
+  <a class="post-link" href="{esc(p['url'])}" target="_blank" rel="noopener">Read on LinkedIn</a>
+</article>""")
+    return '<div class="posts">' + "\n".join(cards) + "</div>"
 
 
 # ---------------------------------------------------------------- layout
@@ -264,13 +325,23 @@ def plans_html(cfg, rel):
 
 # ---------------------------------------------------------------- pages
 
-def build_home(cfg, releases):
+def cat_count_label(n_rel, n_post):
+    parts = [f'{n_rel} release{"s" if n_rel != 1 else ""}']
+    if n_post:
+        parts.append(f'{n_post} post{"s" if n_post != 1 else ""}')
+    return " \u00b7 ".join(parts)
+
+
+def build_home(cfg, releases, posts=()):
     rel = ""
     counts = {c: 0 for c in cfg["categories"]}
     for r in releases:
         counts[r["category"]] = counts.get(r["category"], 0) + 1
+    pcounts = {c: 0 for c in cfg["categories"]}
+    for p in posts:
+        pcounts[p["category"]] = pcounts.get(p["category"], 0) + 1
     cats = "".join(
-        f'<a class="cat" href="category/{slugify(c)}/index.html"><span>{esc(c)}</span><small>{n} release{"s" if n != 1 else ""}</small></a>'
+        f'<a class="cat" href="category/{slugify(c)}/index.html"><span>{esc(c)}</span><small>{cat_count_label(n, pcounts.get(c, 0))}</small></a>'
         for c, n in counts.items()
     )
     body = f"""
@@ -407,9 +478,20 @@ def build_release(cfg, r):
                 path=f"news/{r['slug']}/", og_type="article", extra_head=extra, og_image=og_image)
 
 
-def build_category(cfg, cat, releases):
+def build_category(cfg, cat, releases, posts=()):
     rel = "../../"
     items = [r for r in releases if r["category"] == cat]
+    cat_posts = [p for p in posts if p["category"] == cat]
+    desk = ""
+    if cat_posts:
+        desk = f"""
+<section class="section alt" id="desk">
+  <div class="wrap">
+    <div class="section-head"><h2>From the Asset Arena desk</h2><a href="{esc(cfg['linkedin_url'])}" class="rss" target="_blank" rel="noopener">Follow on LinkedIn</a></div>
+    <p class="desk-note">Commentary by David Lasday on LinkedIn. These are not press releases and are not issued by the companies mentioned.</p>
+    {post_list(cat_posts)}
+  </div>
+</section>"""
     body = f"""
 <section class="section">
   <div class="wrap">
@@ -417,7 +499,7 @@ def build_category(cfg, cat, releases):
     <div class="section-head"><h1 class="page-title">{esc(cat)}</h1></div>
     {release_list(items, rel, empty="No releases in this category yet.")}
   </div>
-</section>"""
+</section>{desk}"""
     return page(cfg, title=cat, description=f"{cat} press releases on {cfg['site_name']}.",
                 rel=rel, body=body, path=f"category/{slugify(cat)}/")
 
@@ -607,13 +689,15 @@ def main(argv):
     include_drafts = "--drafts" in argv
     cfg = load_config()
     releases, errors = load_releases(cfg, include_drafts)
+    posts, post_errors = load_posts(cfg)
+    errors += post_errors
     if errors:
         print("Release problems found:", file=sys.stderr)
         for e in errors:
             print("  - " + e, file=sys.stderr)
         return 1
     if "--check" in argv:
-        print(f"OK: {len(releases)} release(s) valid.")
+        print(f"OK: {len(releases)} release(s) and {len(posts)} post(s) valid.")
         return 0
 
     if OUT.exists():
@@ -626,18 +710,18 @@ def main(argv):
         shutil.copy(ROOT / "CNAME", OUT / "CNAME")
     write(OUT / ".nojekyll", "")
 
-    write(OUT / "index.html", build_home(cfg, releases))
+    write(OUT / "index.html", build_home(cfg, releases, posts))
     for r in releases:
         write(OUT / "news" / r["slug"] / "index.html", build_release(cfg, r))
     for c in cfg["categories"]:
-        write(OUT / "category" / slugify(c) / "index.html", build_category(cfg, c, releases))
+        write(OUT / "category" / slugify(c) / "index.html", build_category(cfg, c, releases, posts))
     write(OUT / "submit" / "index.html", build_submit(cfg))
     write(OUT / "404.html", build_404(cfg))
     write(OUT / "feed.xml", build_feed(cfg, releases))
     write(OUT / "sitemap.xml", build_sitemap(cfg, releases))
     write(OUT / "robots.txt", f"User-agent: *\nAllow: /\nSitemap: {cfg['base_url'].rstrip('/')}/sitemap.xml\n")
 
-    print(f"Built {len(releases)} release(s) into {OUT.relative_to(ROOT)}/")
+    print(f"Built {len(releases)} release(s) and {len(posts)} post(s) into {OUT.relative_to(ROOT)}/")
     return 0
 
 

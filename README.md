@@ -44,6 +44,10 @@ The press release wire built for sports business. A static site on GitHub Pages,
 
 `status` is `published` or `draft`. The category must match one in `config.json`. The build fails on missing fields, duplicate slugs, bad dates, or any em or en dash.
 
+## LinkedIn commentary (posts/)
+
+`posts/linkedin.json` holds David's LinkedIn posts, each with `date`, `category`, `excerpt` (the post's opening hook) and `url`. They show on each category page under "From the Asset Arena desk", labeled as commentary, and add a post count to the homepage category tiles. They are never published as releases, so the approval rule for releases is unaffected. To add posts, append entries to the file (or add another JSON file in `posts/`, one object or a list).
+
 ## Local preview
 
 ```bash
