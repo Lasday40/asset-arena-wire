@@ -3,7 +3,8 @@
 
 Reads config.json and every releases/*.json file, validates them, and writes
 the full site into _site/ (homepage, release pages, category pages, submit
-page, RSS feed, sitemap). Standard library only.
+page, feeds page, main and per category RSS feeds, sitemap, Google News
+sitemap). Standard library only.
 
 Usage:
   python3 build.py            build published releases into _site/
@@ -16,7 +17,7 @@ import json
 import re
 import shutil
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import format_datetime
 from pathlib import Path
 
@@ -255,7 +256,7 @@ def page(cfg, *, title, description, rel, body, path, og_type="website", extra_h
       <p class="muted">{esc(cfg['tagline'])}</p>
     </div>
     <div class="foot-links">
-      <a href="{rel}feed.xml">RSS feed</a>
+      <a href="{rel}feeds/index.html">RSS feeds and syndication</a>
       <a href="{rel}submit/index.html">Submit a release</a>
       <a href="{esc(subscribe_url(cfg))}" target="_blank" rel="noopener">Subscribe to the newsletter</a>
     </div>
@@ -444,12 +445,22 @@ def build_release(cfg, r):
         "@type": "NewsArticle",
         "headline": r["headline"],
         "datePublished": r["date"],
-        "publisher": {"@type": "Organization", "name": cfg["site_name"]},
-        "author": {"@type": "Organization", "name": org["name"]},
+        "dateModified": r.get("updated") or r["date"],
+        "publisher": {
+            "@type": "Organization",
+            "name": cfg["site_name"],
+            "url": cfg["base_url"].rstrip("/") + "/",
+            "logo": {"@type": "ImageObject", "url": cfg["base_url"].rstrip("/") + "/assets/asset-arena-wire-icon.png"},
+        },
+        "author": {"@type": "Organization", "name": org["name"], **({"url": org["url"]} if org.get("url") else {})},
         "url": cfg["base_url"].rstrip("/") + f"/news/{r['slug']}/",
+        "mainEntityOfPage": cfg["base_url"].rstrip("/") + f"/news/{r['slug']}/",
+        "articleSection": r["category"],
+        "description": r.get("subheadline") or r["body"][0][:200],
+        "image": og_image or cfg["base_url"].rstrip("/") + "/assets/asset-arena-wire-icon.png",
     }
-    if og_image:
-        ld["image"] = og_image
+    if r.get("tags"):
+        ld["keywords"] = ", ".join(r["tags"])
     extra = '<script type="application/ld+json">' + json.dumps(ld).replace("</", "<\\/") + "</script>"
     body = f"""
 <article class="release wrap">
@@ -496,12 +507,14 @@ def build_category(cfg, cat, releases, posts=()):
 <section class="section">
   <div class="wrap">
     <p class="crumb"><a href="{rel}index.html#categories">Categories</a></p>
-    <div class="section-head"><h1 class="page-title">{esc(cat)}</h1></div>
+    <div class="section-head"><h1 class="page-title">{esc(cat)}</h1><a href="feed.xml" class="rss">RSS</a></div>
     {release_list(items, rel, empty="No releases in this category yet.")}
   </div>
 </section>{desk}"""
+    alt = (f'<link rel="alternate" type="application/rss+xml" title="{esc(cfg["site_name"])}: {esc(cat)}" '
+           f'href="{esc(cfg["base_url"].rstrip("/"))}/category/{slugify(cat)}/feed.xml">')
     return page(cfg, title=cat, description=f"{cat} press releases on {cfg['site_name']}.",
-                rel=rel, body=body, path=f"category/{slugify(cat)}/")
+                rel=rel, body=body, path=f"category/{slugify(cat)}/", extra_head=alt)
 
 
 def build_submit(cfg):
@@ -647,34 +660,117 @@ def build_404(cfg):
     return page(cfg, title="Not found", description="Page not found", rel=base, body=body, path="404.html")
 
 
-def build_feed(cfg, releases):
+def release_html_abs(cfg, r):
+    """Full release as HTML with absolute URLs, for feed readers and syndication partners."""
+    base = cfg["base_url"].rstrip("/")
+    parts = []
+    img = r.get("image")
+    if img:
+        cap = f'<figcaption>{inline(img["caption"])}</figcaption>' if img.get("caption") else ""
+        parts.append(f'<figure><img src="{esc(base + "/" + img["src"])}" alt="{esc(img["alt"])}">{cap}</figure>')
+    if r.get("subheadline"):
+        parts.append(f"<p><em>{inline(r['subheadline'])}</em></p>")
+    dateline = f'{esc(r["dateline"].upper())}, {nice_date(r["_date"])} /Asset Arena Wire/ ' if r.get("dateline") else ""
+    for n, para in enumerate(r["body"]):
+        parts.append(f"<p>{dateline if n == 0 else ''}{inline(para)}</p>")
+    for a in r.get("about", []):
+        parts.append(f'<h3>About {esc(a.get("name", ""))}</h3><p>{inline(a.get("text", ""))}</p>')
+    c = r["contact"]
+    contact = ", ".join(esc(x) for x in (c.get("name"), c.get("organization"), c.get("email"), c.get("phone")) if x)
+    if contact:
+        parts.append(f"<p><strong>Media contact:</strong> {contact}</p>")
+    link = f"{base}/news/{r['slug']}/"
+    parts.append(f'<p>Originally published on <a href="{esc(link)}">{esc(cfg["site_name"])}</a>.</p>')
+    return "".join(parts)
+
+
+def build_feed(cfg, releases, title=None, path="feed.xml", description=None):
     base = cfg["base_url"].rstrip("/")
     items = []
-    for r in releases[:50]:
-        if r["status"] != "published":
-            continue
+    for r in [r for r in releases if r["status"] == "published"][:50]:
         link = f"{base}/news/{r['slug']}/"
         pub = format_datetime(datetime.combine(r["_date"], datetime.min.time(), timezone.utc))
         desc = r.get("subheadline") or r["body"][0]
+        cats = "".join(f"<category>{esc(t)}</category>" for t in [r["category"]] + list(r.get("tags", [])))
+        img = r.get("image")
+        media = ""
+        if img:
+            ext = Path(img["src"]).suffix.lower().lstrip(".")
+            mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+            media = f'<media:content url="{esc(base + "/" + img["src"])}" medium="image" type="{mime}"/>'
+        content = release_html_abs(cfg, r).replace("]]>", "]]]]><![CDATA[>")
         items.append(f"""<item><title>{esc(r['headline'])}</title><link>{esc(link)}</link><guid isPermaLink="true">{esc(link)}</guid>
-<pubDate>{pub}</pubDate><category>{esc(r['category'])}</category><description>{esc(desc)}</description></item>""")
+<pubDate>{pub}</pubDate><dc:creator>{esc(r['organization']['name'])}</dc:creator>{cats}
+<description>{esc(desc)}</description>{media}
+<content:encoded><![CDATA[{content}]]></content:encoded></item>""")
     now = format_datetime(datetime.now(timezone.utc))
+    title = title or cfg["site_name"]
     return f"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>
-<title>{esc(cfg['site_name'])}</title><link>{esc(base)}/</link>
-<atom:link href="{esc(base)}/feed.xml" rel="self" type="application/rss+xml"/>
-<description>{esc(cfg['description'])}</description><language>en</language><lastBuildDate>{now}</lastBuildDate>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/"><channel>
+<title>{esc(title)}</title><link>{esc(base)}/</link>
+<atom:link href="{esc(base)}/{path}" rel="self" type="application/rss+xml"/>
+<description>{esc(description or cfg['description'])}</description><language>en</language><lastBuildDate>{now}</lastBuildDate>
+<image><url>{esc(base)}/assets/asset-arena-wire-icon.png</url><title>{esc(title)}</title><link>{esc(base)}/</link></image>
 {chr(10).join(items)}
 </channel></rss>
 """
 
 
+def build_news_sitemap(cfg, releases, today=None):
+    """Google News sitemap: only releases from the last two days, as Google asks."""
+    base = cfg["base_url"].rstrip("/")
+    today = today or date.today()
+    cutoff = today - timedelta(days=2)
+    entries = []
+    for r in releases:
+        if r["status"] != "published" or r["_date"] < cutoff or r["_date"] > today:
+            continue
+        entries.append(f"""<url><loc>{esc(base)}/news/{r['slug']}/</loc><news:news>
+<news:publication><news:name>{esc(cfg['site_name'])}</news:name><news:language>en</news:language></news:publication>
+<news:publication_date>{r['date']}</news:publication_date><news:title>{esc(r['headline'])}</news:title>
+</news:news></url>""")
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
+            'xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">\n'
+            + "\n".join(entries) + "\n</urlset>\n")
+
+
+def build_feeds_page(cfg):
+    rel = "../"
+    base = cfg["base_url"].rstrip("/")
+    rows = [("All releases", f"{base}/feed.xml")]
+    rows += [(c, f"{base}/category/{slugify(c)}/feed.xml") for c in cfg["categories"]]
+    items = "".join(
+        f'<li><b>{esc(name)}</b><br><a href="{esc(url)}"><code>{esc(url)}</code></a></li>' for name, url in rows
+    )
+    body = f"""
+<section class="section">
+  <div class="wrap narrow">
+    <p class="eyebrow dark">Feeds and syndication</p>
+    <h1 class="page-title">Get Asset Arena Wire releases automatically</h1>
+    <p class="section-intro">Every release is available as an RSS feed, in full text with images. Use the main feed for everything or pick the categories your readers care about.</p>
+    <h2 class="form-h">Feeds</h2>
+    <ul class="feed-list">{items}</ul>
+    <h2 class="form-h">Republish our releases</h2>
+    <p>Newsletters, sports business sites and podcasts are welcome to republish Asset Arena Wire releases from these feeds. Releases are supplied by the organizations named in them for public distribution. Please keep the release text unchanged, keep the media contact, and link back to the original release page.</p>
+    <p>Want releases in your category sent to you, or to set up a syndication partnership? Email <a href="mailto:{esc(cfg['contact_email'])}">{esc(cfg['contact_email'])}</a>.</p>
+  </div>
+</section>"""
+    return page(cfg, title="RSS feeds and syndication", description=f"RSS feeds of sports business press releases from {cfg['site_name']}, by category, free to republish.",
+                rel=rel, body=body, path="feeds/")
+
+
 def build_sitemap(cfg, releases):
     base = cfg["base_url"].rstrip("/")
-    urls = [f"{base}/", f"{base}/submit/"]
-    urls += [f"{base}/category/{slugify(c)}/" for c in cfg["categories"]]
-    urls += [f"{base}/news/{r['slug']}/" for r in releases if r["status"] == "published"]
-    body = "".join(f"<url><loc>{esc(u)}</loc></url>" for u in urls)
+    pub = [r for r in releases if r["status"] == "published"]
+    latest = max((r["date"] for r in pub), default=None)
+    urls = [(f"{base}/", latest), (f"{base}/submit/", None), (f"{base}/feeds/", None)]
+    for c in cfg["categories"]:
+        urls.append((f"{base}/category/{slugify(c)}/", max((r["date"] for r in pub if r["category"] == c), default=None)))
+    urls += [(f"{base}/news/{r['slug']}/", r.get("updated") or r["date"]) for r in pub]
+    body = "".join(
+        f"<url><loc>{esc(u)}</loc>" + (f"<lastmod>{m}</lastmod>" if m else "") + "</url>" for u, m in urls
+    )
     return f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>\n'
 
 
@@ -715,11 +811,18 @@ def main(argv):
         write(OUT / "news" / r["slug"] / "index.html", build_release(cfg, r))
     for c in cfg["categories"]:
         write(OUT / "category" / slugify(c) / "index.html", build_category(cfg, c, releases, posts))
+        write(OUT / "category" / slugify(c) / "feed.xml", build_feed(
+            cfg, [r for r in releases if r["category"] == c],
+            title=f"{cfg['site_name']}: {c}", path=f"category/{slugify(c)}/feed.xml",
+            description=f"{c} press releases from {cfg['site_name']}."))
     write(OUT / "submit" / "index.html", build_submit(cfg))
     write(OUT / "404.html", build_404(cfg))
     write(OUT / "feed.xml", build_feed(cfg, releases))
+    write(OUT / "feeds" / "index.html", build_feeds_page(cfg))
     write(OUT / "sitemap.xml", build_sitemap(cfg, releases))
-    write(OUT / "robots.txt", f"User-agent: *\nAllow: /\nSitemap: {cfg['base_url'].rstrip('/')}/sitemap.xml\n")
+    write(OUT / "news-sitemap.xml", build_news_sitemap(cfg, releases))
+    base = cfg["base_url"].rstrip("/")
+    write(OUT / "robots.txt", f"User-agent: *\nAllow: /\nSitemap: {base}/sitemap.xml\nSitemap: {base}/news-sitemap.xml\n")
 
     print(f"Built {len(releases)} release(s) and {len(posts)} post(s) into {OUT.relative_to(ROOT)}/")
     return 0

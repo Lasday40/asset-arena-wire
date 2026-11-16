@@ -48,6 +48,19 @@ The press release wire built for sports business. A static site on GitHub Pages,
 
 `posts/linkedin.json` holds David's LinkedIn posts, each with `date`, `category`, `excerpt` (the post's opening hook) and `url`. They show on each category page under "From the Asset Arena desk", labeled as commentary, and add a post count to the homepage category tiles. They are never published as releases, so the approval rule for releases is unaffected. To add posts, append entries to the file (or add another JSON file in `posts/`, one object or a list).
 
+## Feeds, sitemaps and syndication
+
+Each build writes:
+
+- `feed.xml`: all releases, full text with images (`content:encoded`, `media:content`), for feed readers and syndication partners.
+- `category/<slug>/feed.xml`: one feed per category, so a youth sports newsletter can pull only Youth Sports.
+- `feeds/`: public page listing every feed with republishing terms. Point partners here.
+- `sitemap.xml` with `lastmod`, and `news-sitemap.xml` (Google News format, releases from the last two days only). Both are listed in `robots.txt`.
+
+The workflow rebuilds daily so the news sitemap drops releases older than two days. Release pages carry `NewsArticle` structured data with publisher logo and image.
+
+One time: add assetarenawire.com in Google Search Console (Cloudflare DNS TXT verification), submit both sitemaps, then add the site in Google News Publisher Center.
+
 ## Local preview
 
 ```bash
