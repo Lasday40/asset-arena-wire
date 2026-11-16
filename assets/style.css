@@ -204,3 +204,5 @@ textarea{resize:vertical}
 .post-link{margin-top:auto;font:500 13px 'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.06em;color:var(--accent-dark);text-decoration:none}
 .post-link:hover{text-decoration:underline}
 .chip-muted{color:var(--dim)}
+.feed-list{list-style:none;padding:0;margin:0 0 32px;display:grid;gap:14px}
+.feed-list code{font:500 13px 'IBM Plex Mono',monospace;word-break:break-all}
