@@ -5,8 +5,10 @@
 //   3. Run setupSheet() once (authorize when asked) to write the header row.
 //   4. Deploy > New deployment > Web app. Execute as: Me. Who has access: Anyone.
 //   5. Copy the /exec URL into config.json "submit_endpoint", then rebuild.
-// Reviewing: select a row, then use the "Asset Arena Wire" menu to generate
-// the release JSON for the releases/ folder.
+// Publishing: select an approved row, then Asset Arena Wire > Publish selected
+// row. It commits the release JSON and image to GitHub in one commit, the
+// deploy workflow puts it live, and the row is marked Published with its URL.
+// One time: Asset Arena Wire > Set GitHub token (see setGithubToken below).
 
 var SHEET_ID = '1ult7sPwjQpgynWqjk26yEU_Flys8TmLpR5NsgKDOjGg';
 var NOTIFY_EMAIL = 'lasday.david@gmail.com';
@@ -120,16 +122,23 @@ function setupImages() {
   Logger.log(imageFolder_().getUrl());
 }
 
-// ---------- review helpers
+// ---------- review and publishing
+
+var GITHUB_REPO = 'Lasday40/asset-arena-wire';
+var GITHUB_BRANCH = 'main';
+var PUBLISHABLE = ['Approved', 'Invoiced', 'Paid', 'Published'];
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Asset Arena Wire')
-    .addItem('Generate release JSON for selected row', 'showReleaseJson')
+    .addItem('Publish selected row', 'publishSelectedRow')
+    .addItem('Preview release JSON for selected row', 'showReleaseJson')
+    .addSeparator()
+    .addItem('Set GitHub token', 'setGithubToken')
     .addToUi();
 }
 
 function slugify_(s) {
-  return String(s).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
+  return String(s).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80).replace(/-$/, '');
 }
 
 function noDashes_(s) {
@@ -137,48 +146,211 @@ function noDashes_(s) {
   return String(s || '').replace(/\s*[\u2013\u2014]\s*/g, ', ');
 }
 
-function showReleaseJson() {
+function unquote_(s) {
+  s = String(s == null ? '' : s);
+  return s.charAt(0) === "'" ? s.slice(1) : s;
+}
+
+function selectedRow_() {
   var sheet = SpreadsheetApp.getActiveSheet();
   var r = sheet.getActiveRange().getRow();
-  if (r < 2) { SpreadsheetApp.getUi().alert('Select a submission row first.'); return; }
+  if (r < 2) throw new Error('Select a submission row first.');
   var v = sheet.getRange(r, 1, 1, HEADERS.length).getValues()[0];
-  var get = function (name) { return v[HEADERS.indexOf(name)]; };
-  var unquote = function (s) { s = String(s || ''); return s.charAt(0) === "'" ? s.slice(1) : s; };
+  return {
+    sheet: sheet, row: r,
+    get: function (name) { return v[HEADERS.indexOf(name)]; },
+    set: function (name, value) { sheet.getRange(r, HEADERS.indexOf(name) + 1).setValue(value); }
+  };
+}
 
-  var d = get('Requested date');
-  var iso = d instanceof Date ? Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd')
-    : (String(d).match(/^\d{4}-\d{2}-\d{2}$/) ? String(d) : Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd'));
-  var media = unquote(get('Media contact'));
+function driveId_(url) {
+  var m = String(url || '').match(/\/d\/([\w-]{20,})/) || String(url || '').match(/[?&]id=([\w-]{20,})/);
+  return m ? m[1] : '';
+}
+
+// Builds the release object from a Sheet row. slug and date can be forced
+// (used when republishing an existing release).
+function buildRelease_(row, opts) {
+  opts = opts || {};
+  var get = function (name) { return unquote_(row.get(name)); };
+  var iso = opts.date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var media = get('Media contact');
   var emailMatch = media.match(/[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+/);
-  var org = unquote(get('Organization'));
+  var org = noDashes_(get('Organization')).trim();
   var release = {
-    slug: slugify_(unquote(get('Headline'))),
+    slug: opts.slug || slugify_(get('Headline')),
     status: 'published',
     date: iso,
-    dateline: unquote(get('Dateline')).toUpperCase(),
-    category: unquote(get('Category')),
-    organization: { name: org, url: unquote(get('Website')) },
+    dateline: noDashes_(get('Dateline')).toUpperCase().trim(),
+    category: get('Category').trim(),
+    organization: { name: org, url: get('Website').trim() },
     founding_member: /founding/i.test(get('Plan')),
-    headline: noDashes_(unquote(get('Headline'))),
-    subheadline: noDashes_(unquote(get('Subheadline'))),
-    body: noDashes_(unquote(get('Body'))).split(/\n\s*\n/).map(function (s) { return s.replace(/\s*\n\s*/g, ' ').trim(); }).filter(String),
-    about: unquote(get('About')) ? [{ name: org, text: noDashes_(unquote(get('About'))) }] : [],
+    headline: noDashes_(get('Headline')).trim(),
+    subheadline: noDashes_(get('Subheadline')).trim(),
+    body: noDashes_(get('Body')).split(/\n\s*\n/).map(function (s) { return s.replace(/\s*\n\s*/g, ' ').trim(); }).filter(String),
+    about: get('About') ? [{ name: org, text: noDashes_(get('About')).trim() }] : [],
     contact: {
-      name: emailMatch ? media.replace(emailMatch[0], '').replace(/[,;]+/g, ' ').trim() : unquote(get('Contact name')),
+      name: noDashes_(emailMatch ? media.replace(emailMatch[0], '').replace(/[,;<>]+/g, ' ').replace(/\s+/g, ' ').trim() : get('Contact name')),
       organization: org,
-      email: emailMatch ? emailMatch[0] : unquote(get('Email'))
+      email: emailMatch ? emailMatch[0] : get('Email').trim()
     },
     tags: []
   };
-  if (get('Image') && /^https:/.test(get('Image'))) {
-    release.image = { src: 'images/' + iso + '-' + release.slug + '.jpg', alt: release.headline, caption: noDashes_(unquote(get('Image caption'))) };
+  var image = null;
+  var imageUrl = String(row.get('Image') || '');
+  var fileId = /^https:/.test(imageUrl) ? driveId_(imageUrl) : '';
+  if (fileId) {
+    var blob = DriveApp.getFileById(fileId).getBlob();
+    var ext = IMAGE_TYPES[blob.getContentType()] || 'jpg';
+    var src = 'images/' + iso + '-' + release.slug + '.' + ext;
+    release.image = { src: src, alt: release.headline, caption: noDashes_(get('Image caption')).trim() };
+    image = { path: 'releases/' + src, blob: blob };
   }
-  var filename = iso + '-' + release.slug + '.json';
-  var json = JSON.stringify(release, null, 2);
-  var out = HtmlService.createHtmlOutput(
-    '<p style="font-family:sans-serif">Save as <b>releases/' + filename + '</b></p>' +
-    '<textarea style="width:100%;height:420px;font-family:monospace">' +
-    json.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</textarea>'
-  ).setWidth(720).setHeight(520);
-  SpreadsheetApp.getUi().showModalDialog(out, 'Release JSON');
+  return { release: release, path: 'releases/' + iso + '-' + release.slug + '.json', image: image };
+}
+
+// Mirrors the checks in build.py so a bad row never breaks the live deploy.
+function validateRelease_(r, categories) {
+  var errors = [];
+  ['slug', 'date', 'category', 'headline', 'dateline'].forEach(function (k) { if (!r[k]) errors.push('Missing ' + k); });
+  if (!r.organization.name) errors.push('Missing organization');
+  if (!r.body.length) errors.push('Missing release text (Body)');
+  if (!r.contact.name && !r.contact.email) errors.push('Missing media contact');
+  if (r.slug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(r.slug)) errors.push('Headline gives a bad slug: ' + r.slug);
+  if (r.category && categories.indexOf(r.category) < 0) errors.push('Category "' + r.category + '" is not one of: ' + categories.join(', '));
+  if (/[\u2013\u2014]/.test(JSON.stringify(r))) errors.push('Contains an em or en dash');
+  return errors;
+}
+
+// ---------- GitHub
+
+function setGithubToken() {
+  // Create a fine grained token at github.com/settings/personal-access-tokens:
+  // Repository access: only Lasday40/asset-arena-wire. Permissions: Contents, Read and write.
+  var ui = SpreadsheetApp.getUi();
+  var res = ui.prompt('GitHub token', 'Paste a fine grained token with Contents: Read and write on ' + GITHUB_REPO + '.', ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() !== ui.Button.OK) return;
+  var token = res.getResponseText().trim();
+  PropertiesService.getScriptProperties().setProperty('GITHUB_TOKEN', token);
+  try {
+    gh_('GET', '/repos/' + GITHUB_REPO);
+    ui.alert('Token saved and working.');
+  } catch (e) {
+    ui.alert('Token saved, but GitHub rejected it: ' + e.message);
+  }
+}
+
+function gh_(method, path, body) {
+  var token = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
+  if (!token) throw new Error('No GitHub token yet. Use Asset Arena Wire > Set GitHub token.');
+  var opts = {
+    method: method,
+    headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+    muteHttpExceptions: true
+  };
+  if (body) { opts.contentType = 'application/json'; opts.payload = JSON.stringify(body); }
+  var res = UrlFetchApp.fetch('https://api.github.com' + path, opts);
+  var code = res.getResponseCode();
+  if (code === 404 && method === 'GET') return null;
+  if (code >= 300) throw new Error('GitHub ' + method + ' ' + path + ' failed (' + code + '): ' + res.getContentText().slice(0, 300));
+  return JSON.parse(res.getContentText() || '{}');
+}
+
+function ghFile_(path) {
+  var f = gh_('GET', '/repos/' + GITHUB_REPO + '/contents/' + path + '?ref=' + GITHUB_BRANCH);
+  return f ? Utilities.newBlob(Utilities.base64Decode(f.content.replace(/\n/g, ''))).getDataAsString('UTF-8') : null;
+}
+
+// Writes several files in a single commit, so the site deploys once.
+function ghCommit_(files, message) {
+  var base = '/repos/' + GITHUB_REPO + '/git';
+  var ref = gh_('GET', base + '/ref/heads/' + GITHUB_BRANCH);
+  var head = gh_('GET', base + '/commits/' + ref.object.sha);
+  var tree = files.map(function (f) {
+    var blob = gh_('POST', base + '/blobs', { content: Utilities.base64Encode(f.bytes), encoding: 'base64' });
+    return { path: f.path, mode: '100644', type: 'blob', sha: blob.sha };
+  });
+  var newTree = gh_('POST', base + '/trees', { base_tree: head.tree.sha, tree: tree });
+  var commit = gh_('POST', base + '/commits', { message: message, tree: newTree.sha, parents: [head.sha] });
+  gh_('PATCH', base + '/refs/heads/' + GITHUB_BRANCH, { sha: commit.sha });
+  return commit;
+}
+
+// ---------- menu actions
+
+function publishSelectedRow() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    var row = selectedRow_();
+    var status = String(row.get('Status'));
+    if (PUBLISHABLE.indexOf(status) < 0) {
+      ui.alert('Row ' + row.row + ' is "' + (status || 'blank') + '". Only Approved, Invoiced or Paid releases can be published.');
+      return;
+    }
+    var config = JSON.parse(ghFile_('config.json'));
+    var base = config.base_url.replace(/\/$/, '');
+
+    // Republishing keeps the original slug and date so the URL never changes.
+    var existing = String(row.get('Published URL') || '').match(/\/news\/([a-z0-9-]+)\/?$/);
+    var opts = {};
+    var listing = gh_('GET', '/repos/' + GITHUB_REPO + '/contents/releases?ref=' + GITHUB_BRANCH) || [];
+    if (existing) {
+      var prior = listing.filter(function (f) { return f.name.slice(11) === existing[1] + '.json'; })[0];
+      if (prior) opts = { slug: existing[1], date: prior.name.slice(0, 10) };
+    }
+    var built = buildRelease_(row, opts);
+    var r = built.release;
+    if (!existing) {
+      var taken = function (slug) { return listing.some(function (f) { return f.name.slice(11) === slug + '.json'; }); };
+      if (taken(r.slug)) {
+        var alt = (r.slug + '-' + slugify_(r.organization.name)).slice(0, 90).replace(/-$/, '');
+        for (var n = 2; taken(alt); n++) alt = r.slug + '-' + n;
+        built = buildRelease_(row, { slug: alt });
+        r = built.release;
+      }
+    }
+    var errors = validateRelease_(r, config.categories);
+    if (errors.length) { ui.alert('Not published. Fix these in the row first:\n\n' + errors.join('\n')); return; }
+
+    var url = base + '/news/' + r.slug + '/';
+    var notes = [];
+    if (status !== 'Paid' && !existing) notes.push('Status is ' + status + ', not Paid.');
+    var requested = row.get('Requested date');
+    if (requested && !existing) {
+      var req = requested instanceof Date ? Utilities.formatDate(requested, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(requested);
+      if (req !== r.date) notes.push('They requested ' + req + '. It will be dated ' + r.date + ' (today).');
+    }
+    var msg = (existing ? 'UPDATE the live release?' : 'Publish this release?') + '\n\n' +
+      r.headline + '\n' + r.organization.name + ' | ' + r.category + ' | ' + r.date +
+      (r.founding_member ? ' | Founding Member' : '') + '\n' +
+      r.body.length + ' paragraphs' + (built.image ? ', with image' : ', no image') + '\n\n' +
+      url + (notes.length ? '\n\n' + notes.join('\n') : '');
+    if (ui.alert('Asset Arena Wire', msg, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+
+    var files = [{ path: built.path, bytes: Utilities.newBlob(JSON.stringify(r, null, 2) + '\n').getBytes() }];
+    if (built.image) files.push({ path: built.image.path, bytes: built.image.blob.getBytes() });
+    ghCommit_(files, (existing ? 'Update release: ' : 'Publish release: ') + r.headline);
+
+    row.set('Status', 'Published');
+    row.set('Published URL', url);
+    ui.alert('Done. ' + (existing ? 'Updated' : 'Published') + ' to GitHub. The site rebuilds in about 2 minutes:\n\n' + url);
+  } catch (e) {
+    ui.alert('Publish failed, nothing was marked Published.\n\n' + e.message);
+  }
+}
+
+function showReleaseJson() {
+  try {
+    var built = buildRelease_(selectedRow_());
+    var json = JSON.stringify(built.release, null, 2);
+    var out = HtmlService.createHtmlOutput(
+      '<p style="font-family:sans-serif">Preview of <b>' + built.path + '</b>' +
+      (built.image ? ' plus <b>' + built.image.path + '</b>' : '') + '</p>' +
+      '<textarea style="width:100%;height:420px;font-family:monospace">' +
+      json.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</textarea>'
+    ).setWidth(720).setHeight(520);
+    SpreadsheetApp.getUi().showModalDialog(out, 'Release JSON');
+  } catch (e) {
+    SpreadsheetApp.getUi().alert(e.message);
+  }
 }

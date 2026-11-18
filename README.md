@@ -6,7 +6,7 @@ The press release wire built for sports business. A static site on GitHub Pages,
 
 1. A company submits a release on `/submit/`. The form posts to a Google Apps Script web app, which appends a row (status `Pending`) to the submissions Sheet and emails David.
 2. David reviews the row. If approved, he invoices ($199 per release, or $1,200 per year for a Founding Member).
-3. Once paid, he selects the row and uses **Asset Arena Wire > Generate release JSON for selected row** in the Sheet, then saves the output as `releases/YYYY-MM-DD-slug.json`.
+3. Once paid (or approved, for Founding Members), he selects the row and uses **Asset Arena Wire > Publish selected row**. After a confirmation dialog it checks the row against the same rules as `build.py`, commits the release JSON (and the image from Drive, if any) to `main` in one commit, sets Status to `Published` and fills in the Published URL. Editing a Published row and publishing again updates the live release at the same URL. **Preview release JSON** shows the file without publishing.
 4. Pushing to `main` runs `.github/workflows/deploy.yml`, which validates every release, builds the site into `_site/` and deploys it to Pages.
 
 ## Repo layout
@@ -72,4 +72,5 @@ python3 -m http.server -d _site 8000
 
 1. **Pages:** Settings > Pages > Source: **GitHub Actions**.
 2. **Form:** follow the steps at the top of `apps-script/Code.gs`, then paste the web app URL into `config.json` as `submit_endpoint`. Until then the form tells visitors to email their release instead.
-3. **Custom domain:** assetarenawire.com, registered and DNS hosted at Cloudflare (4 A records to GitHub Pages IPs, www CNAME to lasday40.github.io, DNS only). Set in Settings > Pages > Custom domain, with `base_url` in `config.json` and the `CNAME` file matching.
+3. **One-click publish:** create a fine grained GitHub token (github.com/settings/personal-access-tokens) with access to only this repo and **Contents: Read and write**, then in the Sheet use **Asset Arena Wire > Set GitHub token** and paste it. The token is stored in the script's properties, never in the Sheet.
+4. **Custom domain:** assetarenawire.com, registered and DNS hosted at Cloudflare (4 A records to GitHub Pages IPs, www CNAME to lasday40.github.io, DNS only). Set in Settings > Pages > Custom domain, with `base_url` in `config.json` and the `CNAME` file matching.
