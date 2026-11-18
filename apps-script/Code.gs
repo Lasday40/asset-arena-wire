@@ -240,6 +240,14 @@ function setGithubToken() {
   }
 }
 
+// Run from the editor to authorize the script and test the token, which can
+// also be set in Project Settings > Script properties as GITHUB_TOKEN.
+function checkGithub() {
+  var repo = gh_('GET', '/repos/' + GITHUB_REPO);
+  if (!repo) throw new Error('GitHub token cannot see ' + GITHUB_REPO);
+  Logger.log('GitHub token works for ' + repo.full_name + '. Can publish: ' + !!(repo.permissions && repo.permissions.push));
+}
+
 function gh_(method, path, body) {
   var token = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
   if (!token) throw new Error('No GitHub token yet. Use Asset Arena Wire > Set GitHub token.');
