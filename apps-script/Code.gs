@@ -16,24 +16,22 @@ var NOTIFY_EMAIL = 'lasday.david@gmail.com';
 var HEADERS = [
   'Submitted', 'Status', 'Plan', 'Contact name', 'Email', 'Organization', 'Website',
   'Phone', 'Headline', 'Subheadline', 'Category', 'Dateline', 'Requested date',
-  'Body', 'About', 'Media contact', 'Notes', 'Invoice sent', 'Paid', 'Published URL',
+  'Body', 'About', 'Media contact', 'Notes', 'Payment', 'Paid on', 'Published URL',
   'Image', 'Image caption'
 ];
 var IMAGE_FOLDER_NAME = 'Asset Arena Wire Images';
 var IMAGE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 var MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+// Status is the editorial decision; Payment is tracked separately.
+var STATUS_VALUES = ['Pending', 'Approved', 'Rejected', 'Published'];
+var PAYMENT_VALUES = ['Not invoiced', 'Invoiced', 'Paid', 'Waived'];
 
 function doGet() {
   return ContentService.createTextOutput('Asset Arena Wire submission endpoint is live.');
 }
 
 function setupSheet() {
-  var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
-  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
-  sheet.setFrozenRows(1);
-  var statusRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['Pending', 'Approved', 'Rejected', 'Invoiced', 'Paid', 'Published'], true).build();
-  sheet.getRange(2, 2, 1000, 1).setDataValidation(statusRule);
+  formatSheet();
 }
 
 // Run once from the editor: keeps every row one line tall so long text
@@ -42,10 +40,53 @@ function setupSheet() {
 var COLUMN_WIDTHS = {
   'Submitted': 130, 'Status': 90, 'Plan': 120, 'Contact name': 130, 'Email': 180,
   'Organization': 150, 'Headline': 320, 'Category': 140, 'Body': 220, 'About': 160,
-  'Notes': 160, 'Published URL': 220, 'Image': 120
+  'Notes': 160, 'Payment': 110, 'Paid on': 100, 'Published URL': 220, 'Image': 120
 };
 function formatSheet() {
   var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
+  var rows = Math.max(sheet.getMaxRows() - 1, 1);
+  var statusCol = HEADERS.indexOf('Status') + 1;
+  var payCol = HEADERS.indexOf('Payment') + 1;
+
+  // Older rows kept payment inside Status; move it to the Payment column.
+  var last = sheet.getLastRow();
+  if (last > 1) {
+    var st = sheet.getRange(2, statusCol, last - 1, 1).getValues();
+    var pay = sheet.getRange(2, payCol, last - 1, 1).getValues();
+    for (var i = 0; i < st.length; i++) {
+      if (st[i][0] === 'Invoiced' || st[i][0] === 'Paid') { pay[i][0] = st[i][0]; st[i][0] = 'Approved'; }
+      if (PAYMENT_VALUES.indexOf(pay[i][0]) < 0) pay[i][0] = 'Not invoiced';
+    }
+    sheet.getRange(2, statusCol, last - 1, 1).setValues(st);
+    sheet.getRange(2, payCol, last - 1, 1).setValues(pay);
+  }
+
+  var dropdown = function (values) {
+    return SpreadsheetApp.newDataValidation().requireValueInList(values, true).setAllowInvalid(false).build();
+  };
+  var statusRange = sheet.getRange(2, statusCol, rows, 1);
+  var payRange = sheet.getRange(2, payCol, rows, 1);
+  statusRange.setDataValidation(dropdown(STATUS_VALUES));
+  payRange.setDataValidation(dropdown(PAYMENT_VALUES));
+  sheet.getRange(2, HEADERS.indexOf('Paid on') + 1, rows, 1).setNumberFormat('yyyy-mm-dd');
+
+  var colors = {
+    'Pending': '#fff2cc', 'Approved': '#d9ead3', 'Rejected': '#f4cccc', 'Published': '#cfe2f3',
+    'Not invoiced': '#eeeeee', 'Invoiced': '#fff2cc', 'Paid': '#d9ead3', 'Waived': '#d9d2e9'
+  };
+  var managed = [statusRange.getA1Notation(), payRange.getA1Notation()];
+  var rules = sheet.getConditionalFormatRules().filter(function (r) {
+    return !r.getRanges().some(function (g) { return managed.indexOf(g.getA1Notation()) >= 0; });
+  });
+  STATUS_VALUES.forEach(function (v) {
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(v).setBackground(colors[v]).setRanges([statusRange]).build());
+  });
+  PAYMENT_VALUES.forEach(function (v) {
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(v).setBackground(colors[v]).setRanges([payRange]).build());
+  });
+  sheet.setConditionalFormatRules(rules);
+
   var all = sheet.getRange(1, 1, sheet.getMaxRows(), HEADERS.length);
   all.setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setVerticalAlignment('top');
   if (sheet.getMaxRows() > 1) sheet.setRowHeightsForced(2, sheet.getMaxRows() - 1, 21);
@@ -72,7 +113,7 @@ function doPost(e) {
       clean(p.organization), clean(p.website), clean(p.phone), clean(p.headline, 300),
       clean(p.subheadline, 400), clean(p.category), clean(p.dateline), clean(p.release_date),
       clean(p.body, 20000), clean(p.about, 3000), clean(p.media_contact), clean(p.notes, 3000),
-      '', '', '', '', clean(p.image_caption, 300)
+      'Not invoiced', '', '', '', clean(p.image_caption, 300)
     ];
     // Save the image first; a bad image must not lose the submission.
     try {
@@ -151,7 +192,7 @@ function setupImages() {
 
 var GITHUB_REPO = 'Lasday40/asset-arena-wire';
 var GITHUB_BRANCH = 'main';
-var PUBLISHABLE = ['Approved', 'Invoiced', 'Paid', 'Published'];
+var PUBLISHABLE = ['Approved', 'Published'];
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Asset Arena Wire')
@@ -317,7 +358,7 @@ function publishSelectedRow() {
     var row = selectedRow_();
     var status = String(row.get('Status'));
     if (PUBLISHABLE.indexOf(status) < 0) {
-      ui.alert('Row ' + row.row + ' is "' + (status || 'blank') + '". Only Approved, Invoiced or Paid releases can be published.');
+      ui.alert('Row ' + row.row + ' is "' + (status || 'blank') + '". Set Status to Approved first.');
       return;
     }
     var config = JSON.parse(ghFile_('config.json'));
@@ -347,7 +388,8 @@ function publishSelectedRow() {
 
     var url = base + '/news/' + r.slug + '/';
     var notes = [];
-    if (status !== 'Paid' && !existing) notes.push('Status is ' + status + ', not Paid.');
+    var payment = String(row.get('Payment') || 'Not invoiced');
+    if (!existing && payment !== 'Paid' && payment !== 'Waived') notes.push('Payment is ' + payment + ', not Paid.');
     var requested = row.get('Requested date');
     if (requested && !existing) {
       var req = requested instanceof Date ? Utilities.formatDate(requested, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(requested);

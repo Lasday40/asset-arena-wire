@@ -5,8 +5,8 @@ The press release wire built for sports business. A static site on GitHub Pages,
 ## How it works
 
 1. A company submits a release on `/submit/`. The form posts to a Google Apps Script web app, which appends a row (status `Pending`) to the submissions Sheet and emails David.
-2. David reviews the row. If approved, he invoices ($199 per release, or $1,200 per year for a Founding Member).
-3. Once paid (or approved, for Founding Members), he selects the row and uses **Asset Arena Wire > Publish selected row**. After a confirmation dialog it checks the row against the same rules as `build.py`, commits the release JSON (and the image from Drive, if any) to `main` in one commit, sets Status to `Published` and fills in the Published URL. Editing a Published row and publishing again updates the live release at the same URL. **Preview release JSON** shows the file without publishing.
+2. David reviews the row and sets **Status** (dropdown: Pending, Approved, Rejected, Published). Payment is tracked separately in the **Payment** column (Not invoiced, Invoiced, Paid, Waived) with the date in **Paid on**. Invoices are $199 per release, or $1,200 per year for a Founding Member.
+3. Once a row is Approved (normally after Payment is Paid), he selects the row and uses **Asset Arena Wire > Publish selected row**. After a confirmation dialog it checks the row against the same rules as `build.py`, commits the release JSON (and the image from Drive, if any) to `main` in one commit, sets Status to `Published` and fills in the Published URL. Editing a Published row and publishing again updates the live release at the same URL. **Preview release JSON** shows the file without publishing.
 4. Pushing to `main` runs `.github/workflows/deploy.yml`, which validates every release, builds the site into `_site/` and deploys it to Pages.
 
 ## Repo layout
