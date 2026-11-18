@@ -36,6 +36,26 @@ function setupSheet() {
   sheet.getRange(2, 2, 1000, 1).setDataValidation(statusRule);
 }
 
+// Run once from the editor: keeps every row one line tall so long text
+// (Body, About, Notes) is clipped instead of stretching rows. Click a cell to
+// read its full text in the formula bar.
+var COLUMN_WIDTHS = {
+  'Submitted': 130, 'Status': 90, 'Plan': 120, 'Contact name': 130, 'Email': 180,
+  'Organization': 150, 'Headline': 320, 'Category': 140, 'Body': 220, 'About': 160,
+  'Notes': 160, 'Published URL': 220, 'Image': 120
+};
+function formatSheet() {
+  var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
+  var all = sheet.getRange(1, 1, sheet.getMaxRows(), HEADERS.length);
+  all.setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setVerticalAlignment('top');
+  if (sheet.getMaxRows() > 1) sheet.setRowHeightsForced(2, sheet.getMaxRows() - 1, 21);
+  Object.keys(COLUMN_WIDTHS).forEach(function (h) {
+    var c = HEADERS.indexOf(h);
+    if (c >= 0) sheet.setColumnWidth(c + 1, COLUMN_WIDTHS[h]);
+  });
+  sheet.setFrozenRows(1);
+}
+
 function doPost(e) {
   var lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -62,6 +82,11 @@ function doPost(e) {
     }
     var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
     sheet.appendRow(row);
+    try {
+      var last = sheet.getLastRow();
+      sheet.getRange(last, 1, 1, HEADERS.length).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+      sheet.setRowHeightsForced(last, 1, 21);
+    } catch (fmtErr) { /* cosmetic only */ }
 
     try {
       MailApp.sendEmail({
