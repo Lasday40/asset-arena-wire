@@ -247,7 +247,66 @@ function onOpen() {
 }
 
 function slugify_(s) {
-  return String(s).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80).replace(/-$/, '');
+  var full = String(s).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  if (full.length <= 80) return full;
+  var cut = full.slice(0, 81);
+  return cut.slice(0, cut.lastIndexOf('-')); // end on a whole word
+}
+
+// Text pasted from PDFs has hard line breaks mid-sentence, words split with
+// a hyphen at the line end, and bullet lists. Turn it into clean paragraphs;
+// each bullet becomes its own paragraph starting with a bullet sign.
+var BULLET_RE = /^\s*[\u2022\u25cf\u25aa\u25e6\u00b7*\-]\s+/;
+function paragraphs_(text) {
+  text = String(text || '').replace(/\r\n?/g, '\n').replace(/(\w)-\n(?=[a-z])/g, '$1-');
+  var out = [];
+  text.split(/\n\s*\n/).forEach(function (block) {
+    var cur = '';
+    block.split('\n').forEach(function (line) {
+      line = line.trim();
+      if (!line) return;
+      if (BULLET_RE.test(line)) {
+        if (cur) out.push(cur);
+        var item = line.replace(BULLET_RE, '');
+        var m = item.match(/^([^.:]{2,60}):\s+(.*)$/);
+        cur = '\u2022 ' + (m ? '**' + m[1] + ':** ' + m[2] : item);
+      } else {
+        cur = cur ? cur + ' ' + line : line;
+      }
+    });
+    if (cur) out.push(cur);
+  });
+  return out;
+}
+
+// "About Acme" title lines are dropped; the site adds its own heading.
+function aboutText_(text, org) {
+  var lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+  if (lines.length > 1 && /^\s*about\b/i.test(lines[0]) && lines[0].length < 80) lines.shift();
+  return paragraphs_(lines.join('\n')).join(' ');
+}
+
+// Picks the first person with an email from a media contact block such as
+// "Media Contacts:\nAgency\nJane Doe, jane@x.com; 555-1234\nJohn Roe, john@x.com".
+function contact_(media, fallbackName, fallbackEmail, org) {
+  var emailRe = /[^\s@,;<>()]+@[^\s@,;<>()]+\.[^\s@,;<>()]+/;
+  var lines = String(media || '').replace(/\r\n?/g, '\n').split('\n').map(function (l) { return l.trim(); }).filter(String);
+  for (var i = 0; i < lines.length; i++) {
+    var em = lines[i].match(emailRe);
+    if (!em) continue;
+    var rest = lines[i].replace(em[0], ' ');
+    var phone = (rest.match(/\+?\d[\d\s().-]{6,}\d/) || [''])[0].trim();
+    var name = rest.replace(phone, ' ').replace(/^\s*media contacts?\s*:?/i, '').replace(/[,;:|<>()]+/g, ' ').replace(/\s+/g, ' ').trim();
+    var agency = '';
+    for (var j = i - 1; j >= 0; j--) {
+      if (!/^media contacts?\s*:?$/i.test(lines[j]) && !emailRe.test(lines[j])) { agency = lines[j].replace(/:$/, ''); break; }
+    }
+    if (!name && agency && i > 0) { name = agency; agency = ''; }
+    var c = { name: name || fallbackName, organization: agency || org, email: em[0] };
+    if (phone) c.phone = phone;
+    return c;
+  }
+  return { name: String(media || '').trim() || fallbackName, organization: org, email: fallbackEmail };
 }
 
 function noDashes_(s) {
@@ -287,8 +346,6 @@ function buildRelease_(row, opts) {
   opts = opts || {};
   var get = function (name) { return unquote_(row.get(name)); };
   var iso = opts.date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  var media = get('Media contact');
-  var emailMatch = media.match(/[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+/);
   var org = noDashes_(get('Organization')).trim();
   var release = {
     slug: opts.slug || slugify_(get('Headline')),
@@ -300,13 +357,9 @@ function buildRelease_(row, opts) {
     founding_member: /founding/i.test(get('Plan')),
     headline: noDashes_(get('Headline')).trim(),
     subheadline: noDashes_(get('Subheadline')).trim(),
-    body: noDashes_(get('Body')).split(/\n\s*\n/).map(function (s) { return s.replace(/\s*\n\s*/g, ' ').trim(); }).filter(String),
-    about: get('About') ? [{ name: org, text: noDashes_(get('About')).trim() }] : [],
-    contact: {
-      name: noDashes_(emailMatch ? media.replace(emailMatch[0], '').replace(/[,;<>]+/g, ' ').replace(/\s+/g, ' ').trim() : get('Contact name')),
-      organization: org,
-      email: emailMatch ? emailMatch[0] : get('Email').trim()
-    },
+    body: paragraphs_(noDashes_(get('Body'))),
+    about: get('About') ? [{ name: org, text: aboutText_(noDashes_(get('About')), org) }] : [],
+    contact: contact_(noDashes_(get('Media contact')), noDashes_(get('Contact name')).trim(), get('Email').trim(), org),
     tags: []
   };
   var image = null;
