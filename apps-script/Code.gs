@@ -13,12 +13,32 @@
 var SHEET_ID = '1ult7sPwjQpgynWqjk26yEU_Flys8TmLpR5NsgKDOjGg';
 var NOTIFY_EMAIL = 'lasday.david@gmail.com';
 
+// Column order for a new Sheet. The code finds columns by header name, so
+// columns can be rearranged in the Sheet without breaking anything.
 var HEADERS = [
-  'Submitted', 'Status', 'Plan', 'Contact name', 'Email', 'Organization', 'Website',
-  'Phone', 'Headline', 'Subheadline', 'Category', 'Dateline', 'Requested date',
-  'Body', 'About', 'Media contact', 'Notes', 'Payment', 'Paid on', 'Published URL',
-  'Image', 'Image caption'
+  'Submitted', 'Status', 'Payment', 'Plan', 'Contact name', 'Email', 'Organization',
+  'Website', 'Phone', 'Headline', 'Subheadline', 'Category', 'Dateline',
+  'Requested date', 'Body', 'About', 'Media contact', 'Notes', 'Paid on',
+  'Published URL', 'Image', 'Image caption'
 ];
+
+function sheet_() {
+  return SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
+}
+
+// Maps header name to its 1-based column number in the live Sheet.
+function columns_(sheet) {
+  var map = {};
+  var width = Math.max(sheet.getLastColumn(), 1);
+  sheet.getRange(1, 1, 1, width).getValues()[0].forEach(function (h, i) {
+    if (h) map[String(h).trim()] = i + 1;
+  });
+  return map;
+}
+
+function colLetter_(sheet, c) {
+  return sheet.getRange(1, c).getA1Notation().replace(/\d+/g, '');
+}
 var IMAGE_FOLDER_NAME = 'Asset Arena Wire Images';
 var IMAGE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 var MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -43,11 +63,26 @@ var COLUMN_WIDTHS = {
   'Notes': 160, 'Payment': 110, 'Paid on': 100, 'Published URL': 220, 'Image': 120
 };
 function formatSheet() {
-  var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
-  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
+  var sheet = sheet_();
+  var cols = columns_(sheet);
+  if (!Object.keys(cols).length) {
+    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+    cols = columns_(sheet);
+  }
+  // Add any missing columns at the end, then keep Payment right after Status.
+  HEADERS.forEach(function (h) {
+    if (!cols[h]) { sheet.getRange(1, sheet.getLastColumn() + 1).setValue(h); cols = columns_(sheet); }
+  });
+  if (cols['Payment'] !== cols['Status'] + 1) {
+    var L = colLetter_(sheet, cols['Payment']);
+    sheet.moveColumns(sheet.getRange(L + ':' + L), cols['Status'] + 1);
+    cols = columns_(sheet);
+  }
+  var width = sheet.getLastColumn();
+  sheet.getRange(1, 1, 1, width).setFontWeight('bold');
   var rows = Math.max(sheet.getMaxRows() - 1, 1);
-  var statusCol = HEADERS.indexOf('Status') + 1;
-  var payCol = HEADERS.indexOf('Payment') + 1;
+  var statusCol = cols['Status'];
+  var payCol = cols['Payment'];
 
   // Older rows kept payment inside Status; move it to the Payment column.
   var last = sheet.getLastRow();
@@ -69,15 +104,18 @@ function formatSheet() {
   var payRange = sheet.getRange(2, payCol, rows, 1);
   statusRange.setDataValidation(dropdown(STATUS_VALUES));
   payRange.setDataValidation(dropdown(PAYMENT_VALUES));
-  sheet.getRange(2, HEADERS.indexOf('Paid on') + 1, rows, 1).setNumberFormat('yyyy-mm-dd');
+  sheet.getRange(2, cols['Paid on'], rows, 1).setNumberFormat('yyyy-mm-dd');
 
   var colors = {
     'Pending': '#fff2cc', 'Approved': '#d9ead3', 'Rejected': '#f4cccc', 'Published': '#cfe2f3',
     'Not invoiced': '#eeeeee', 'Invoiced': '#fff2cc', 'Paid': '#d9ead3', 'Waived': '#d9d2e9'
   };
-  var managed = [statusRange.getA1Notation(), payRange.getA1Notation()];
+  // Replace our own color rules, keep any rules added by hand.
+  var ours = STATUS_VALUES.concat(PAYMENT_VALUES);
   var rules = sheet.getConditionalFormatRules().filter(function (r) {
-    return !r.getRanges().some(function (g) { return managed.indexOf(g.getA1Notation()) >= 0; });
+    var c = r.getBooleanCondition();
+    if (!c || c.getCriteriaType() !== SpreadsheetApp.BooleanCriteria.TEXT_EQUAL_TO) return true;
+    return ours.indexOf(String(c.getCriteriaValues()[0])) < 0;
   });
   STATUS_VALUES.forEach(function (v) {
     rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(v).setBackground(colors[v]).setRanges([statusRange]).build());
@@ -87,12 +125,11 @@ function formatSheet() {
   });
   sheet.setConditionalFormatRules(rules);
 
-  var all = sheet.getRange(1, 1, sheet.getMaxRows(), HEADERS.length);
-  all.setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setVerticalAlignment('top');
+  sheet.getRange(1, 1, sheet.getMaxRows(), width)
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setVerticalAlignment('top');
   if (sheet.getMaxRows() > 1) sheet.setRowHeightsForced(2, sheet.getMaxRows() - 1, 21);
   Object.keys(COLUMN_WIDTHS).forEach(function (h) {
-    var c = HEADERS.indexOf(h);
-    if (c >= 0) sheet.setColumnWidth(c + 1, COLUMN_WIDTHS[h]);
+    if (cols[h]) sheet.setColumnWidth(cols[h], COLUMN_WIDTHS[h]);
   });
   sheet.setFrozenRows(1);
 }
@@ -108,47 +145,53 @@ function doPost(e) {
       v = String(v || '').slice(0, max || 1000);
       return /^[=+\-@]/.test(v) ? "'" + v : v; // block formula injection
     };
-    var row = [
-      new Date(), 'Pending', clean(p.plan), clean(p.contact_name), clean(p.email),
-      clean(p.organization), clean(p.website), clean(p.phone), clean(p.headline, 300),
-      clean(p.subheadline, 400), clean(p.category), clean(p.dateline), clean(p.release_date),
-      clean(p.body, 20000), clean(p.about, 3000), clean(p.media_contact), clean(p.notes, 3000),
-      'Not invoiced', '', '', '', clean(p.image_caption, 300)
-    ];
+    var d = {
+      'Submitted': new Date(), 'Status': 'Pending', 'Payment': 'Not invoiced',
+      'Plan': clean(p.plan), 'Contact name': clean(p.contact_name), 'Email': clean(p.email),
+      'Organization': clean(p.organization), 'Website': clean(p.website), 'Phone': clean(p.phone),
+      'Headline': clean(p.headline, 300), 'Subheadline': clean(p.subheadline, 400),
+      'Category': clean(p.category), 'Dateline': clean(p.dateline), 'Requested date': clean(p.release_date),
+      'Body': clean(p.body, 20000), 'About': clean(p.about, 3000), 'Media contact': clean(p.media_contact),
+      'Notes': clean(p.notes, 3000), 'Image caption': clean(p.image_caption, 300), 'Image': ''
+    };
     // Save the image first; a bad image must not lose the submission.
     try {
-      row[20] = saveImage_(p, clean(p.organization, 60));
+      d['Image'] = saveImage_(p, clean(p.organization, 60));
     } catch (imgErr) {
-      row[20] = p.image_data ? 'Image upload failed: ' + imgErr : '';
+      d['Image'] = p.image_data ? 'Image upload failed: ' + imgErr : '';
     }
-    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
+    var sheet = sheet_();
+    var cols = columns_(sheet);
+    var row = [];
+    for (var c = 0; c < sheet.getLastColumn(); c++) row.push('');
+    Object.keys(d).forEach(function (k) { if (cols[k]) row[cols[k] - 1] = d[k]; });
     sheet.appendRow(row);
     try {
       var last = sheet.getLastRow();
-      sheet.getRange(last, 1, 1, HEADERS.length).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+      sheet.getRange(last, 1, 1, row.length).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
       sheet.setRowHeightsForced(last, 1, 21);
     } catch (fmtErr) { /* cosmetic only */ }
 
     try {
       MailApp.sendEmail({
         to: NOTIFY_EMAIL,
-        subject: 'New Wire submission (' + row[2] + '): ' + row[8],
+        subject: 'New Wire submission (' + d['Plan'] + '): ' + d['Headline'],
         body: [
-          'Plan: ' + row[2],
-          'From: ' + row[3] + ' <' + row[4] + '>',
-          'Organization: ' + row[5] + ' ' + row[6],
-          'Category: ' + row[10],
-          'Requested date: ' + row[12],
-          'Image: ' + (row[20] || 'none'),
+          'Plan: ' + d['Plan'],
+          'From: ' + d['Contact name'] + ' <' + d['Email'] + '>',
+          'Organization: ' + d['Organization'] + ' ' + d['Website'],
+          'Category: ' + d['Category'],
+          'Requested date: ' + d['Requested date'],
+          'Image: ' + (d['Image'] || 'none'),
           '',
-          'Headline: ' + row[8],
-          'Subheadline: ' + row[9],
+          'Headline: ' + d['Headline'],
+          'Subheadline: ' + d['Subheadline'],
           '',
-          row[13],
+          d['Body'],
           '',
           'Sheet: https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit'
         ].join('\n'),
-        replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row[4]) ? row[4] : NOTIFY_EMAIL
+        replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d['Email']) ? d['Email'] : NOTIFY_EMAIL
       });
     } catch (mailErr) {
       // Row is saved already; a mail failure must not lose the submission.
@@ -221,11 +264,15 @@ function selectedRow_() {
   var sheet = SpreadsheetApp.getActiveSheet();
   var r = sheet.getActiveRange().getRow();
   if (r < 2) throw new Error('Select a submission row first.');
-  var v = sheet.getRange(r, 1, 1, HEADERS.length).getValues()[0];
+  var cols = columns_(sheet);
+  var v = sheet.getRange(r, 1, 1, sheet.getLastColumn()).getValues()[0];
   return {
     sheet: sheet, row: r,
-    get: function (name) { return v[HEADERS.indexOf(name)]; },
-    set: function (name, value) { sheet.getRange(r, HEADERS.indexOf(name) + 1).setValue(value); }
+    get: function (name) { return cols[name] ? v[cols[name] - 1] : ''; },
+    set: function (name, value) {
+      if (!cols[name]) throw new Error('Column "' + name + '" is missing from the Sheet.');
+      sheet.getRange(r, cols[name]).setValue(value);
+    }
   };
 }
 
